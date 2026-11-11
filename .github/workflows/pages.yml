@@ -1,0 +1,95 @@
+# SPDX-FileCopyrightText: 2026 lumtail contributors
+# SPDX-License-Identifier: MIT
+
+# Builds the site from lumtail/lumtail main and deploys it to GitHub Pages.
+#
+# - lumtail-updated dispatch: sent by lumtail/lumtail's .github/workflows/site.yml
+#   when a release is published or a push to main touches a file the site
+#   renders. Security fixes reach the site with their release.
+# - schedule: safety net every 6 hours. It deploys only when the content key
+#   differs from the live build.json, so quiet runs cost one short job and no deploy.
+# - push and workflow_dispatch: always deploy.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [lumtail-updated]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      deploy: ${{ steps.compare.outputs.deploy }}
+    steps:
+      - name: Check out site
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: site
+          persist-credentials: false
+      - name: Check out lumtail
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lumtail/lumtail
+          path: lumtail
+          persist-credentials: false
+      - name: Install mandoc
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends mandoc
+      - name: Test build script
+        run: python3 -m unittest discover -s site/tests
+      - name: Build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 site/build.py --source lumtail --sync --out _site
+      - name: Compare with live site
+        id: compare
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          key=$(jq -r .key _site/build.json)
+          live=$(curl -fsS --max-time 20 https://lumtail.github.io/build.json | jq -r .key || true)
+          if [[ $EVENT != schedule || $key != "$live" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Deploying: event=$EVENT key=${key:0:12} live=${live:0:12}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Up to date: key=${key:0:12}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload site
+        if: steps.compare.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

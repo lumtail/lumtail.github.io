@@ -1,0 +1,15 @@
+<!--
+SPDX-FileCopyrightText: 2026 lumtail contributors
+SPDX-License-Identifier: MIT
+Adapted from lumtail/assets/img/lumtail-mark-light.svg and lumtail-mark-dark.svg.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+    <style>
+        .l { stroke: #373630 } .t { stroke: #9B6D32 }
+        @media (prefers-color-scheme: dark) { .l { stroke: #EEE9DF } .t { stroke: #E9A84C } }
+    </style>
+    <g stroke-width="12" stroke-linecap="round" transform="translate(0 6)">
+        <path class="l" d="M24 36H72M24 60H56"/>
+        <path class="t" d="M24 84H64C86.091 84 104 66.091 104 44V28"/>
+    </g>
+</svg>

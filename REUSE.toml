@@ -1,0 +1,8 @@
+version = 1
+
+# Files without comment syntax, and generated data.
+[[annotations]]
+path = [".nojekyll", ".gitignore", "data/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 lumtail contributors"
+SPDX-License-Identifier = "MIT"
