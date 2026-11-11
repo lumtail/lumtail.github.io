@@ -45,9 +45,15 @@ ARTWORK = (
     "img/lumtail-social.png", "img/lumtail-social.png.license",
     "img/lumtail-avatar.png", "img/lumtail-avatar.png.license",
     "img/lumtail-social.svg",
-    "demo/follow-filter.gif", "demo/follow-filter.gif.license",
-    "demo/follow-filter-mobile.gif", "demo/follow-filter-mobile.gif.license",
 )
+
+# Terminal recordings in lumtail/assets/demo, in the order the home page offers
+# them: (file stem, switch label). Each has <stem>.gif, <stem>-mobile.gif and
+# the asciinema <stem>.cast whose title and commands describe it.
+DEMOS = (("read-logs", "Read"), ("follow-filter", "Follow"), ("inspect-record", "Inspect"),
+         ("history-filter", "History"), ("search-speed", "Search"))
+ARTWORK += tuple(f"demo/{stem}{variant}.gif{suffix}" for stem, _ in DEMOS
+                 for variant in ("", "-mobile") for suffix in ("", ".license"))
 
 FORMATS = (  # (label, manual, anchor)
     ("JSON Lines", "lumtail-formats.7", "JSON_LINES"),
@@ -178,6 +184,51 @@ def platform_of(name: str) -> tuple[str, str]:
     if not system and re.search(r"(source|src|\.tar\.(gz|xz)$)", low):
         system = "Source"
     return system or "Other", arch
+
+
+# --------------------------------------------------------------------------- demos
+
+def gif_size(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:10]
+    if header[:4] != b"GIF8":
+        sys.exit(f"{path}: not a GIF")
+    return int.from_bytes(header[6:8], "little"), int.from_bytes(header[8:10], "little")
+
+
+def cast_info(path: Path) -> tuple[str, list[str]]:
+    """Title and the lumtail commands typed in an asciinema v2 recording."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    title = json.loads(lines[0]).get("title", "").removeprefix("Lumtail: ")
+    text = "".join(event[2] for event in map(json.loads, lines[1:]) if event[1] == "o")
+    # Drop escape sequences and the " \r" a terminal emits when a line wraps.
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text).replace(" \r", "").replace("\r", "")
+    commands = [line[2:].strip() for line in text.split("\n") if line.startswith("$ lumtail")]
+    # Sentence case, but keep names that are always lowercase (nginx, sshd).
+    if not re.match(r"(nginx|sshd)\b", title):
+        title = title[:1].upper() + title[1:]
+    return title, commands
+
+
+def load_demos(source: Path) -> list[dict]:
+    demos = []
+    for stem, label in DEMOS:
+        base = source / "assets" / "demo"
+        title, commands = cast_info(base / f"{stem}.cast")
+        if not title or not commands:
+            sys.exit(f"{stem}.cast: missing title or lumtail command")
+        demos.append({"key": stem, "label": label, "title": title, "commands": commands,
+                      "size": gif_size(base / f"{stem}.gif"),
+                      "mobile_size": gif_size(base / f"{stem}-mobile.gif")})
+    return demos
+
+
+def demo_shot(d: dict) -> str:
+    (w, h), (mw, mh) = d["size"], d["mobile_size"]
+    alt = f"Terminal recording: {d['title'].rstrip('.')}. Runs " + "; then ".join(d["commands"]) + "."
+    return f"""<picture class="shot shot-demo shot-{d['key']}" hidden>
+          <source data-srcset="assets/demo/{d['key']}-mobile.gif" media="(max-width: 640px)" width="{mw}" height="{mh}">
+          <img data-src="assets/demo/{d['key']}.gif" width="{w}" height="{h}" alt="{esc(alt)}">
+        </picture>"""
 
 
 # --------------------------------------------------------------------------- manual rendering
@@ -359,18 +410,14 @@ def page_index(ctx: dict) -> str:
           <img src="assets/img/lumtail-preview-light.svg" width="1120" height="420"
                alt="lumtail --rules examples/modules.json examples/mixed.log shows JSON Lines, syslog, access log and custom records as one stream with colored severity labels.">
         </picture>
-        <picture class="shot shot-live" hidden>
-          <source data-srcset="assets/demo/follow-filter-mobile.gif" media="(max-width: 640px)">
-          <img data-src="assets/demo/follow-filter.gif" width="1139" height="505"
-               alt="Terminal recording: lumtail follows a growing log, then shows only API records with status 500 or higher.">
-        </picture>
+        {"".join(demo_shot(d) for d in ctx["demos"])}
       </div>
       <figcaption>
         <span class="caption caption-output">Four formats in one file, one stream.</span>
-        <span class="caption caption-live" hidden>Following a log, then filtering it live.</span>
+        {"".join(f'<span class="caption caption-{d["key"]}" hidden>{esc(d["title"])}.</span>' for d in ctx["demos"])}
         <span class="switch" role="group" aria-label="Preview" hidden>
           <button type="button" data-show="output" aria-pressed="true">Output</button>
-          <button type="button" data-show="live" aria-pressed="false">Live</button>
+          {"".join(f'<button type="button" data-show="{d["key"]}" aria-pressed="false">{esc(d["label"])}</button>' for d in ctx["demos"])}
         </span>
       </figcaption>
     </figure>
@@ -726,7 +773,8 @@ def build(source: Path, out: Path) -> None:
         "releases": read_json("releases.json", []),
         "advisories": read_json("advisories.json", []),
         "license": (source / "LICENSE").read_text(encoding="utf-8"),
-        "docs": [(name, title, note,
+        "demos": load_demos(source),
+        "docs":[(name, title, note,
                   absolute_links(strip_spdx((source / "docs" / name).read_text(encoding="utf-8")),
                                  f"{GH}/blob/{commit}/docs/"))
                  for name, title, note in AGENT_DOCS if (source / "docs" / name).exists()],
@@ -792,6 +840,7 @@ def build(source: Path, out: Path) -> None:
         target.write_text(text, encoding="utf-8")
 
     inputs = [source / "man" / p for p in PAGES] + [source / "assets" / a for a in ARTWORK]
+    inputs += [source / "assets" / "demo" / f"{stem}.cast" for stem, _ in DEMOS]
     inputs += [source / "assets" / "LICENSE", source / "LICENSE"] + sorted(DATA.glob("*.json"))
     inputs += [source / "docs" / name for name, *_ in ctx["docs"]] + [contracts / c for c in CONTRACTS]
     for name in CONTRACTS:

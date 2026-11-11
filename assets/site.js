@@ -21,22 +21,22 @@ document.addEventListener("click", async (event) => {
   }, 1400);
 });
 
-// Home stage: switch between the static output and the live recording.
-// The GIF is fetched only when asked for.
+// Home stage: switch between the static output and the terminal recordings.
+// Each GIF is fetched only when asked for.
 const stage = document.querySelector(".stage");
 if (stage) {
   const sw = stage.querySelector(".switch");
+  const modes = [...sw.querySelectorAll("button[data-show]")].map((b) => b.dataset.show);
   sw.hidden = false;
   sw.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-show]");
     if (!button) return;
     const mode = button.dataset.show;
     for (const b of sw.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === button));
-    if (mode === "live") {
-      for (const el of stage.querySelectorAll(".shot-live [data-srcset]")) { el.srcset = el.dataset.srcset; el.removeAttribute("data-srcset"); }
-      for (const el of stage.querySelectorAll(".shot-live [data-src]")) { el.src = el.dataset.src; el.removeAttribute("data-src"); }
-    }
-    for (const name of ["output", "live"]) {
+    const shot = stage.querySelector(`.shot-${mode}`);
+    for (const el of shot.querySelectorAll("[data-srcset]")) { el.srcset = el.dataset.srcset; el.removeAttribute("data-srcset"); }
+    for (const el of shot.querySelectorAll("[data-src]")) { el.src = el.dataset.src; el.removeAttribute("data-src"); }
+    for (const name of modes) {
       stage.querySelector(`.shot-${name}`).hidden = name !== mode;
       stage.querySelector(`.caption-${name}`).hidden = name !== mode;
     }

@@ -89,6 +89,22 @@ class AgentText(unittest.TestCase):
             self.assertIn(command, text)
 
 
+class Demos(unittest.TestCase):
+    def test_cast_info(self):
+        import json, tempfile
+        events = [[0.1, "o", "$ "], [0.2, "o", "lumtail --filter 'a=1' checko \r"],
+                  [0.3, "o", "ut.log\r\n\x1b[1mINFO\x1b[0m x\r\n"], [0.4, "o", "$ clear\r\n"]]
+        with tempfile.NamedTemporaryFile("w", suffix=".cast", delete=False) as f:
+            f.write(json.dumps({"version": 2, "title": "Lumtail: nginx in one stream"}) + "\n")
+            f.write("\n".join(json.dumps(e) for e in events) + "\n")
+        try:
+            title, commands = build.cast_info(Path(f.name))
+        finally:
+            Path(f.name).unlink()
+        self.assertEqual(title, "nginx in one stream")
+        self.assertEqual(commands, ["lumtail --filter 'a=1' checkout.log"])
+
+
 @unittest.skipUnless(shutil.which("mandoc"), "mandoc not installed")
 class FullBuild(unittest.TestCase):
     def test_agent_files(self):

@@ -197,7 +197,7 @@ main { flex: 1 0 auto; display: flex; flex-direction: column; }
   border-radius: 16px; box-shadow: var(--shadow);
 }
 @media (prefers-color-scheme: dark) { .shot img { box-shadow: 0 0 0 1px var(--line), var(--shadow); } }
-.shot-live img {
+.shot-demo img {
   aspect-ratio: 1120 / 420; object-fit: contain; background: var(--term-bg);
   border-radius: 16px; filter: none; box-shadow: var(--shadow);
 }
@@ -227,9 +227,13 @@ main { flex: 1 0 auto; display: flex; flex-direction: column; }
   .frame { flex: none; container-type: normal; }
   .shot { position: static; }
   .shot img { width: 100%; aspect-ratio: auto; }
-  .shot-live img { aspect-ratio: 1139 / 505; }
+  .shot-demo img { aspect-ratio: auto; } /* from width/height of the img or its source */
 }
-@media (max-width: 640px) { .shot-live img { aspect-ratio: 578 / 621; } }
+/* Six choices must fit a phone without widening the page. */
+@media (max-width: 640px) {
+  .switch { max-width: 100%; flex-wrap: wrap; justify-content: center; }
+  .switch button { padding: 6px 8px; }
+}
 
 .manlist { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line-soft); }
 .manlist a {
