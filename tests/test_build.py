@@ -75,7 +75,9 @@ class AgentText(unittest.TestCase):
                          "[c](https://x.org/) [d](#here)")
 
     def test_strip_spdx(self):
+        # REUSE-IgnoreStart
         self.assertEqual(build.strip_spdx("<!--\nSPDX-License-Identifier: MIT\n-->\n\n# Title\n"), "# Title\n")
+        # REUSE-IgnoreEnd
 
     def test_llms_txt(self):
         ctx = {"releases": [], "docs": [("agents.md", "Agents", "how", "")],

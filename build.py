@@ -82,7 +82,10 @@ AGENT_DOCS = (("agents.md", "Using Lumtail from agents", "bounded snapshots, fie
 # CLI API 1 contract files published under cli/v1/ (MIT, see the LICENSE beside them).
 CONTRACTS = ("agent-schema.json", "record-schema.json", "contract.json", "LICENSE")
 
+# Headers written into generated files; not this file's own notice.
+# REUSE-IgnoreStart
 SPDX = "<!--\nSPDX-FileCopyrightText: 2026 lumtail contributors\nSPDX-License-Identifier: MIT\n-->\n"
+# REUSE-IgnoreEnd
 esc = html.escape
 STATIC = ("assets/site.css", "assets/site.js", "favicon.svg", ".nojekyll")
 CURRENT = ' aria-current="page"'
@@ -749,6 +752,7 @@ def bench_status(b: dict) -> str:
 def bench_summary(b: dict) -> dict:
     """Machine-readable digest of the page, for scripts and agents."""
     return {
+        "license": "MIT", "copyright": "2026 lumtail contributors",
         "revision": b["revision"], "committed": b["committed"], "measured": b["date"],
         "code_changes_since": b["code_changes"],
         "host": {"cpu": b["cpu"], "logical_cpus": b["cpus"], "os": b["os"], "compiler": b["compiler"]},
@@ -959,16 +963,18 @@ Markdown renderings of the manual pages installed with Lumtail.
 - [Full documentation]({BASE_URL}llms-full.txt): every manual page and guide above in one file
 {performance}- [Security]({BASE_URL}security/): private reporting and published advisories
 - [Source code]({GH})
+
+Lumtail and this site are released under the MIT License: {BASE_URL}LICENSE.txt
 """
 
 
 def llms_full_txt(ctx: dict) -> str:
-    parts = [f"# Lumtail documentation\n\nAll Lumtail manual pages and agent guides in one file. "
-             f"Index: {BASE_URL}llms.txt\n"]
+    parts = [f"{SPDX}\n# Lumtail documentation\n\nAll Lumtail manual pages and agent guides in one file. "
+             f"Index: {BASE_URL}llms.txt. License: MIT, see {BASE_URL}LICENSE.txt\n"]
     for m in ctx["manuals"]:
         parts.append(f"Source: {BASE_URL}man/{m['page']}.html\n\n{m['markdown']}")
     for name, _, _, text in ctx["docs"]:
-        parts.append(f"Source: {GH}/blob/{ctx['commit']}/docs/{name}\n\n{text}")
+        parts.append(f"Source: {GH}/blob/{ctx['commit']}/docs/{name}\n\n{strip_spdx(text)}")
     return "\n---\n\n".join(parts)
 
 
@@ -981,6 +987,7 @@ def atom(*, path: str, title: str, link: str, entries: list[dict], updated: str)
     <summary>{esc(e['summary'])}</summary>
   </entry>
 """ for e in entries)
+    # REUSE-IgnoreStart
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-FileCopyrightText: 2026 lumtail contributors -->
 <!-- SPDX-License-Identifier: MIT -->
@@ -993,6 +1000,7 @@ def atom(*, path: str, title: str, link: str, entries: list[dict], updated: str)
   <author><name>lumtail contributors</name></author>
 {items}</feed>
 """
+    # REUSE-IgnoreEnd
 
 
 # --------------------------------------------------------------------------- main
@@ -1011,7 +1019,7 @@ def build(source: Path, out: Path) -> None:
         "demos": load_demos(source),
         "bench": load_benchmarks(source),
         "docs":[(name, title, note,
-                  absolute_links(strip_spdx((source / "docs" / name).read_text(encoding="utf-8")),
+                  absolute_links((source / "docs" / name).read_text(encoding="utf-8"),
                                  f"{GH}/blob/{commit}/docs/"))
                  for name, title, note in AGENT_DOCS if (source / "docs" / name).exists()],
     }
@@ -1042,7 +1050,7 @@ def build(source: Path, out: Path) -> None:
     }
     for m in ctx["manuals"]:
         files[f"man/{m['page']}.html"] = page_manual(ctx, m)
-        files[f"man/{m['page']}.md"] = m["markdown"]
+        files[f"man/{m['page']}.md"] = f"{SPDX}\n{m['markdown']}"
     for name, _, _, text in ctx["docs"]:
         files[f"docs/{name}"] = text
     if ctx["bench"]:
