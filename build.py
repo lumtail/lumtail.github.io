@@ -244,6 +244,9 @@ GENERATED = (("json", "JSON Lines"), ("json-ts", "JSON with epoch times, every o
              ("syslog", "syslog"), ("plain", "Plain text"), ("mixed", "JSON, syslog, access and plain"),
              ("multiline", "Multiline, three lines per record"), ("long", "JSON, 4 KiB messages"))
 MIB = 2 ** 20
+# Public datasets left off the site, by corpus key in public-logs.json.
+# "access" is the Zanbil web access log.
+EXCLUDED_DATASETS = frozenset({"access"})
 
 
 def git(source: Path, *args: str) -> str:
@@ -272,6 +275,8 @@ def load_benchmarks(source: Path) -> dict | None:
 
     datasets = []
     for key, corpus in public["corpora"].items():
+        if key in EXCLUDED_DATASETS:
+            continue
         rows = {(r["query"], r["threads"]): r for r in public["results"]
                 if r["corpus"] == key and r["mode"] == "json"}
         queries = []
@@ -820,7 +825,7 @@ def page_performance(ctx: dict) -> str:
   </dl>
 
   <h2 id="public-logs" class="gap">Public datasets</h2>
-  <p class="sub">Three published log datasets, filtered with fixed queries and written as JSON
+  <p class="sub">{("No", "One", "Two", "Three", "Four", "Five")[min(len(b["datasets"]), 5)]} published log datasets, filtered with fixed queries and written as JSON
     (<code>--output=json</code>). The filter with no match tests 24 patterns against every record.</p>
   <div class="table-wrap"><table class="assets data">
     <thead><tr>{th("Dataset", "Query", "Matching records", "1 worker MiB/s", "auto MiB/s", "auto seconds", "Peak MiB", text_cols=2)}</tr></thead>
