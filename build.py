@@ -254,11 +254,12 @@ def load_benchmarks(source: Path) -> dict | None:
     root = source / "benchmarks" / "results"
     runs = [d for d in root.iterdir() if d.is_dir() and all((d / f).exists() for f in BENCH_FILES)] \
         if root.is_dir() else []
-    dated = [(git(source, "show", "-s", "--format=%ct", f"{d.name}^{{commit}}"), d) for d in runs]
-    dated = [(int(t), d) for t, d in dated if t.isdigit()]
-    if not dated:
+    if not runs:
         return None
-    _, run = max(dated, key=lambda item: item[0])
+    # Newest by the recorded finish time, so a shallow checkout works too.
+    stamp = lambda d: (lambda p: p.get("finished_utc") or p.get("created_utc") or "")(
+        json.loads((d / "public-logs.json").read_text(encoding="utf-8")))
+    run = max(runs, key=stamp)
     public, stress, suite = (json.loads((run / f).read_text(encoding="utf-8")) for f in BENCH_FILES)
     revision = public["host"]["revision"]
     report = (run / "README.md").read_text(encoding="utf-8") if (run / "README.md").exists() else ""
@@ -307,7 +308,9 @@ def load_benchmarks(source: Path) -> dict | None:
                 ("First record appended to a followed file", ms("latency/follow/line/1", "first_response_seconds")),
                 ("Each later record appended to a followed file", ms("latency/follow/line/1", "response_seconds"))]
 
-    changes = git(source, "rev-list", "--count", f"{revision}..HEAD", "--", *CODE_PATHS)
+    # Needs the revision in the local history; without it the page says it could not tell.
+    known = git(source, "cat-file", "-t", revision) == "commit"
+    changes = git(source, "rev-list", "--count", f"{revision}..HEAD", "--", *CODE_PATHS) if known else ""
     return {
         "revision": revision, "dir": run.name,
         "date": public.get("finished_utc") or public["created_utc"],
@@ -735,7 +738,7 @@ def bench_status(b: dict) -> str:
         n = b["code_changes"]
         return (f"{n} later commit{'s' if n != 1 else ''} on <code>main</code> change{'' if n != 1 else 's'} the code; "
                 "these numbers may no longer describe it.")
-    return ""
+    return "This build could not check whether the code changed since."
 
 
 def bench_summary(b: dict) -> dict:

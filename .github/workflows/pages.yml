@@ -50,6 +50,10 @@ jobs:
           repository: lumtail/lumtail
           path: lumtail
           persist-credentials: false
+          # Commit history without old file contents: enough to tell whether the
+          # code changed after the benchmarked revision, at a fraction of a full clone.
+          fetch-depth: 0
+          filter: blob:none
       - name: Install mandoc
         run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends mandoc
       - name: Test build script
