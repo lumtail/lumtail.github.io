@@ -231,6 +231,98 @@ def demo_shot(d: dict) -> str:
         </picture>"""
 
 
+# --------------------------------------------------------------------------- benchmarks
+
+# Recorded runs live in lumtail/benchmarks/results/<revision>/. The page shows the
+# newest run that has all three files below, and says whether the code changed since.
+BENCH_FILES = ("public-logs.json", "stress-1m.json", "suite.json")
+CODE_PATHS = ("src", "include", "CMakeLists.txt", "cmake")
+PUBLIC_QUERIES = (("parse", "Every record"), ("selective", "Selective filter"),
+                  ("broad", "Broad filter"), ("late-miss", "Filter with no match"))
+GENERATED = (("json", "JSON Lines"), ("json-ts", "JSON with epoch times, every other record 64 extra fields"),
+             ("kubernetes", "Kubernetes audit"), ("zeek", "Zeek JSON"), ("access", "Web access log"),
+             ("syslog", "syslog"), ("plain", "Plain text"), ("mixed", "JSON, syslog, access and plain"),
+             ("multiline", "Multiline, three lines per record"), ("long", "JSON, 4 KiB messages"))
+MIB = 2 ** 20
+
+
+def git(source: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(source), *args], capture_output=True, text=True).stdout.strip()
+
+
+def load_benchmarks(source: Path) -> dict | None:
+    root = source / "benchmarks" / "results"
+    runs = [d for d in root.iterdir() if d.is_dir() and all((d / f).exists() for f in BENCH_FILES)] \
+        if root.is_dir() else []
+    dated = [(git(source, "show", "-s", "--format=%ct", f"{d.name}^{{commit}}"), d) for d in runs]
+    dated = [(int(t), d) for t, d in dated if t.isdigit()]
+    if not dated:
+        return None
+    _, run = max(dated, key=lambda item: item[0])
+    public, stress, suite = (json.loads((run / f).read_text(encoding="utf-8")) for f in BENCH_FILES)
+    revision = public["host"]["revision"]
+    report = (run / "README.md").read_text(encoding="utf-8") if (run / "README.md").exists() else ""
+    compiler = re.search(r"^- Compiler: ([^,\n]+)", report, re.M)
+    host = public["host"]
+    platform = re.match(r"macOS-([\d.]+)", host["platform"])
+
+    def peak(row) -> float:
+        return row["peak_rss_bytes"]["max"] / MIB
+
+    datasets = []
+    for key, corpus in public["corpora"].items():
+        rows = {(r["query"], r["threads"]): r for r in public["results"]
+                if r["corpus"] == key and r["mode"] == "json"}
+        queries = []
+        for name, label in PUBLIC_QUERIES:
+            one, auto = rows.get((name, "1")), rows.get((name, "auto"))
+            if not (one and auto):
+                continue
+            queries.append({"label": label, "matches": auto["matches"],
+                            "one": one["input_mib_per_second"], "auto": auto["input_mib_per_second"],
+                            "seconds": auto["seconds"]["median"], "peak": max(peak(one), peak(auto))})
+        src = corpus["source"]
+        datasets.append({"title": src["title"], "page": src["page"], "license": src["license"],
+                         "credit": src["credit"], "origin": src.get("origin", ""),
+                         "gib": corpus["input_bytes"] / 2 ** 30, "records": corpus["input_records"],
+                         "passes": corpus["passes"], "source_mib": corpus["source_bytes"] / MIB,
+                         "queries": queries})
+
+    cases = {(r["corpus"], r["mode"], r["threads"]): r for r in stress["results"] if r.get("suite") == "pipeline"}
+    generated = []
+    for key, label in GENERATED:
+        cells = {(m, t): cases.get((key, m, t)) for m in ("text", "json", "raw") for t in ("1", "auto")}
+        if not all(cells.values()):
+            continue
+        generated.append({"key": key, "label": label, "mib": stress["corpora"][key]["bytes"] / MIB,
+                          **{f"{m}_{t}": cells[(m, t)]["input_mib_per_second"] for m, t in cells},
+                          "records": cells[("text", "auto")]["records_per_second"],
+                          "peak": max(peak(r) for r in cells.values())})
+
+    by_case = {r["case"]: r for r in suite["results"]}
+    ms = lambda case, key="seconds": by_case[case][key]["median"] * 1000 if case in by_case else None
+    response = [("Start-up and exit, <code>--version</code>", ms("startup/version")),
+                ("First record through a pipe", ms("latency/pipe/line/1", "first_response_seconds")),
+                ("Each later record through a pipe", ms("latency/pipe/line/1", "response_seconds")),
+                ("First record appended to a followed file", ms("latency/follow/line/1", "first_response_seconds")),
+                ("Each later record appended to a followed file", ms("latency/follow/line/1", "response_seconds"))]
+
+    changes = git(source, "rev-list", "--count", f"{revision}..HEAD", "--", *CODE_PATHS)
+    return {
+        "revision": revision, "dir": run.name,
+        "date": public.get("finished_utc") or public["created_utc"],
+        "committed": git(source, "show", "-s", "--format=%cI", revision),
+        "code_changes": int(changes) if changes.isdigit() else None,
+        "cpu": host.get("cpu") or host.get("machine", ""), "cpus": host.get("logical_cpus"),
+        "os": f"macOS {platform[1]}" if platform else host["platform"],
+        "compiler": compiler[1].strip() if compiler else "",
+        "repetitions": public["settings"]["repetitions"], "warmups": public["settings"]["warmups"],
+        "datasets": datasets, "generated": generated,
+        "response": [(label, value) for label, value in response if value is not None],
+        "files": [run / f for f in BENCH_FILES] + ([run / "README.md"] if report else []),
+    }
+
+
 # --------------------------------------------------------------------------- manual rendering
 
 def normalize(raw: str) -> tuple[str, str]:
@@ -361,6 +453,7 @@ def layout(*, root: str, path: str, title: str, description: str, body: str,
       <a href="{GH}/blob/main/docs/guide.md">Guide</a>
       <a href="{GH}/issues/new?template=bug_report.yml">Report a bug</a>
       <a href="{root}security/">Security</a>
+      {f'<a href="{root}performance/">Performance</a>' if ctx.get("bench") else ""}
       <a href="{root}license/">MIT License</a>
       <a href="{root}llms.txt">llms.txt</a>
     </nav>
@@ -627,6 +720,137 @@ def page_security(ctx: dict) -> str:
                   body=body, section="security", ctx=ctx)
 
 
+def num(value: float, digits: int = 0) -> str:
+    return f"{value:,.{digits}f}"
+
+
+def millis(value: float) -> str:
+    return num(value, 3 if value < 1 else 1 if value < 10 else 0)
+
+
+def bench_status(b: dict) -> str:
+    if b["code_changes"] == 0:
+        return "The code on <code>main</code> has not changed since, so these numbers describe it."
+    if b["code_changes"]:
+        n = b["code_changes"]
+        return (f"{n} later commit{'s' if n != 1 else ''} on <code>main</code> change{'' if n != 1 else 's'} the code; "
+                "these numbers may no longer describe it.")
+    return ""
+
+
+def bench_summary(b: dict) -> dict:
+    """Machine-readable digest of the page, for scripts and agents."""
+    return {
+        "revision": b["revision"], "committed": b["committed"], "measured": b["date"],
+        "code_changes_since": b["code_changes"],
+        "host": {"cpu": b["cpu"], "logical_cpus": b["cpus"], "os": b["os"], "compiler": b["compiler"]},
+        "method": {"statistic": "median", "repetitions": b["repetitions"], "warmups": b["warmups"],
+                   "cache": "warm", "output": "/dev/null", "startup": "included",
+                   "throughput": "input MiB divided by elapsed seconds", "peak_memory": "largest peak RSS of any run"},
+        "public_logs": [{"dataset": d["title"], "license": d["license"], "source": d["page"],
+                         "input_gib": round(d["gib"], 2), "records": d["records"],
+                         "queries": [{"query": q["label"], "matching_records": q["matches"],
+                                      "mib_per_second_1_worker": round(q["one"]),
+                                      "mib_per_second_auto": round(q["auto"]),
+                                      "seconds_auto": round(q["seconds"], 3),
+                                      "peak_memory_mib": round(q["peak"], 1)} for q in d["queries"]]}
+                        for d in b["datasets"]],
+        "generated_1m_records": [{"corpus": g["key"], "description": g["label"], "input_mib": round(g["mib"]),
+                                  **{f"{m}_mib_per_second_{t}": round(g[f"{m}_{t}"])
+                                     for m in ("text", "json", "raw") for t in ("1", "auto")},
+                                  "text_records_per_second_auto": round(g["records"]),
+                                  "peak_memory_mib": round(g["peak"], 1)} for g in b["generated"]],
+        "response_ms": [{"measurement": re.sub(r"<[^>]+>", "", label), "median_ms": round(value, 3)}
+                        for label, value in b["response"]],
+        "raw_results": f"{GH}/tree/main/benchmarks/results/{b['dir']}",
+    }
+
+
+def page_performance(ctx: dict) -> str:
+    b = ctx["bench"]
+    rev = b["revision"]
+    results = f"{GH}/tree/main/benchmarks/results/{b['dir']}"
+    when = day(b["date"])
+    host = ", ".join(filter(None, (b["cpu"], f"{b['cpus']} logical CPUs" if b["cpus"] else "", b["os"])))
+    def th(*cols: str, text_cols: int = 1) -> str:
+        return "".join(f'<th scope="col"{" class=num" if i >= text_cols else ""}>{c}</th>' for i, c in enumerate(cols))
+
+    public_rows = []
+    for d in b["datasets"]:
+        for i, q in enumerate(d["queries"]):
+            head = (f'<th scope="row" rowspan="{len(d["queries"])}">{esc(d["title"])}'
+                    f'<span class="cell-note">{num(d["gib"], 2)} GiB · {num(d["records"])} records</span></th>') if i == 0 else ""
+            public_rows.append(f"""<tr>{head}<td>{esc(q['label'])}</td><td class="num">{num(q['matches'])}</td>
+          <td class="num">{num(q['one'])}</td><td class="num">{num(q['auto'])}</td>
+          <td class="num">{num(q['seconds'], 2)}</td><td class="num">{num(q['peak'], 1)}</td></tr>""")
+    sources = "".join(f"""<li><a href="{esc(d['page'])}">{esc(d['title'])}</a> ({esc(d['license'])}).
+        {esc(d['origin'].rstrip('.'))}.{f" Built from a {num(d['source_mib'], 1)} MiB source repeated {d['passes']} times." if d['passes'] > 1 else ''}
+        <span class="muted">Credit: {esc(d['credit'])}.</span></li>""" for d in b["datasets"])
+
+    gen_rows = "".join(f"""<tr><th scope="row">{esc(g['label'])}<span class="cell-note"><code>{esc(g['key'])}</code></span></th>
+          <td class="num">{num(g['mib'])}</td><td class="num">{num(g['text_1'])}</td><td class="num">{num(g['text_auto'])}</td>
+          <td class="num">{num(g['json_auto'])}</td><td class="num">{num(g['raw_auto'])}</td>
+          <td class="num">{num(g['records'] / 1e6, 1)}</td><td class="num">{num(g['peak'], 1)}</td></tr>"""
+                       for g in b["generated"])
+    resp_rows = "".join(f'<tr><th scope="row">{label}</th><td class="num">{millis(value)}</td></tr>'
+                        for label, value in b["response"])
+    peak_all = max([q["peak"] for d in b["datasets"] for q in d["queries"]] + [g["peak"] for g in b["generated"]])
+
+    body = f"""<section class="page-head"><div class="wrap">
+  <h1>Performance</h1>
+  <p class="lede">How fast Lumtail reads, filters and writes logs, and how much memory it uses,
+    measured on one machine.</p>
+  <p class="note">Revision <a href="{GH}/commit/{rev}"><code>{rev[:7]}</code></a>, measured {when}. {bench_status(b)}</p>
+</div></section>
+<section class="band band-tight"><div class="wrap">
+  <h2 id="method">How to read these numbers</h2>
+  <dl class="facts">
+    <dt>Machine</dt><dd>{esc(host)}{f"; {esc(b['compiler'])}, release build" if b['compiler'] else ""}.</dd>
+    <dt>Statistic</dt><dd>Median of {b['repetitions']} runs after {b['warmups']} warm-up run. Files are in the page cache,
+      output goes to <code>/dev/null</code>, and process start-up is included.</dd>
+    <dt>Throughput</dt><dd>Input size in MiB divided by elapsed seconds.</dd>
+    <dt>Workers</dt><dd><code>1</code> runs one worker thread; <code>auto</code> lets Lumtail choose
+      (<a href="../man/lumtail.1.html#Workers_and_statistics"><code>--threads</code></a>), here up to the {b['cpus']} logical CPUs.</dd>
+    <dt>Memory</dt><dd>Largest peak resident set size of any run. No case exceeded {num(peak_all, 1)} MiB.</dd>
+    <dt>Limits</dt><dd>One machine and one run. Another CPU, a cold cache, a slow disk or a terminal as output
+      changes every number. Treat them as orders of magnitude, not guarantees.</dd>
+  </dl>
+
+  <h2 id="public-logs" class="gap">Public datasets</h2>
+  <p class="sub">Three published log datasets, filtered with fixed queries and written as JSON
+    (<code>--output=json</code>). The filter with no match tests 24 patterns against every record.</p>
+  <div class="table-wrap"><table class="assets data">
+    <thead><tr>{th("Dataset", "Query", "Matching records", "1 worker MiB/s", "auto MiB/s", "auto seconds", "Peak MiB", text_cols=2)}</tr></thead>
+    <tbody>{"".join(public_rows)}</tbody></table></div>
+  <ul class="sources">{sources}</ul>
+
+  <h2 id="generated" class="gap">One million generated records</h2>
+  <p class="sub">Ten generated inputs of 1,000,000 records each. <code>text</code> is the terminal format,
+    <code>json</code> writes every parsed field, <code>raw</code> writes the original record unchanged.
+    Peak MiB is the largest of the row's runs.</p>
+  <div class="table-wrap"><table class="assets data">
+    <thead><tr>{th("Input", "MiB", "text 1 worker MiB/s", "text auto MiB/s", "json auto MiB/s", "raw auto MiB/s", "text auto million records/s", "Peak MiB")}</tr></thead>
+    <tbody>{gen_rows}</tbody></table></div>
+
+  <h2 id="response" class="gap">Start-up and response time</h2>
+  <p class="sub">One worker, one record per line, read back as JSON. A followed file is checked every
+    100 ms, which sets the time for later appended records.</p>
+  <div class="table-wrap"><table class="assets data narrow-table">
+    <thead><tr>{th("Measurement", "Median ms")}</tr></thead>
+    <tbody>{resp_rows}</tbody></table></div>
+
+  <p class="note gap">Every sample, command, input hash and executable hash:
+    <a href="{results}">benchmark results for <code>{rev[:7]}</code></a>, with the
+    <a href="{GH}/blob/main/benchmarks/README.md">benchmark procedure</a>. The figures on this page are also
+    available as <a href="summary.json">JSON</a>.</p>
+</div></section>
+"""
+    return layout(root="../", path="performance/index.html", title="Lumtail performance",
+                  description=f"Measured throughput, memory and response time of Lumtail at revision {rev[:7]}.",
+                  body=body, section="performance", ctx=ctx,
+                  extra_head='<link rel="alternate" type="application/json" href="summary.json">\n')
+
+
 def page_license(ctx: dict) -> str:
     paragraphs = [" ".join(p.split()) for p in ctx["license"].strip().split("\n\n")]
     title, copyright_line, *terms = paragraphs
@@ -683,6 +907,9 @@ def llms_txt(ctx: dict) -> str:
     contracts = "\n".join(f"- [{name}]({BASE_URL}cli/v1/{name})" for name in CONTRACTS if name.endswith(".json"))
     latest = next((r for r in ctx["releases"] if not r["prerelease"]), None)
     version = f"The latest release is {latest['tag']}. " if latest else ""
+    bench = ctx.get("bench")
+    performance = (f"- [Performance]({BASE_URL}performance/): throughput, memory and response time measured at "
+                   f"revision {bench['revision'][:7]}; [as JSON]({BASE_URL}performance/summary.json)\n" if bench else "")
     return f"""# Lumtail
 
 > Lumtail is a command-line tool that follows log files and streams as they grow, reads each
@@ -722,7 +949,7 @@ Markdown renderings of the manual pages installed with Lumtail.
 ## Optional
 
 - [Full documentation]({BASE_URL}llms-full.txt): every manual page and guide above in one file
-- [Security]({BASE_URL}security/): private reporting and published advisories
+{performance}- [Security]({BASE_URL}security/): private reporting and published advisories
 - [Source code]({GH})
 """
 
@@ -774,6 +1001,7 @@ def build(source: Path, out: Path) -> None:
         "advisories": read_json("advisories.json", []),
         "license": (source / "LICENSE").read_text(encoding="utf-8"),
         "demos": load_demos(source),
+        "bench": load_benchmarks(source),
         "docs":[(name, title, note,
                   absolute_links(strip_spdx((source / "docs" / name).read_text(encoding="utf-8")),
                                  f"{GH}/blob/{commit}/docs/"))
@@ -784,7 +1012,8 @@ def build(source: Path, out: Path) -> None:
     if broken:
         sys.exit("manual rendering check failed:\n  " + "\n  ".join(broken))
     missing = [f"{m}#{a}" for _, m, a in FORMATS if a not in by_page[m]["ids"]]
-    missing += [] if "SECURITY_CONSIDERATIONS" in by_page["lumtail.1"]["ids"] else ["lumtail.1#SECURITY_CONSIDERATIONS"]
+    missing += [f"lumtail.1#{a}" for a in ("SECURITY_CONSIDERATIONS", "Workers_and_statistics")
+                if a not in by_page["lumtail.1"]["ids"]]
     if missing:
         sys.exit(f"manual anchors missing: {', '.join(missing)}")
     stale = [c for c in AGENT_EXAMPLES if c not in by_page["lumtail-agent.7"]["markdown"]]
@@ -808,6 +1037,9 @@ def build(source: Path, out: Path) -> None:
         files[f"man/{m['page']}.md"] = m["markdown"]
     for name, _, _, text in ctx["docs"]:
         files[f"docs/{name}"] = text
+    if ctx["bench"]:
+        files["performance/index.html"] = page_performance(ctx)
+        files["performance/summary.json"] = json.dumps(bench_summary(ctx["bench"]), indent=2) + "\n"
     files["llms.txt"] = llms_txt(ctx)
     files["llms-full.txt"] = llms_full_txt(ctx)
     files["download/releases.json"] = json.dumps(ctx["releases"], indent=2, ensure_ascii=False) + "\n"
@@ -841,6 +1073,7 @@ def build(source: Path, out: Path) -> None:
 
     inputs = [source / "man" / p for p in PAGES] + [source / "assets" / a for a in ARTWORK]
     inputs += [source / "assets" / "demo" / f"{stem}.cast" for stem, _ in DEMOS]
+    inputs += ctx["bench"]["files"] if ctx["bench"] else []
     inputs += [source / "assets" / "LICENSE", source / "LICENSE"] + sorted(DATA.glob("*.json"))
     inputs += [source / "docs" / name for name, *_ in ctx["docs"]] + [contracts / c for c in CONTRACTS]
     for name in CONTRACTS:

@@ -28,7 +28,11 @@ For agents it also writes `llms.txt`, `llms-full.txt` (the manual and
 `docs/agents.md`, `docs/cli-api.md` in one file; both guides are also served
 under `docs/`), a Markdown copy of each manual
 page (`mandoc -Tmarkdown`), `download/releases.json` and the CLI API 1 schemas
-from `contracts/cli/v1/` under `cli/v1/`. Markup from mandoc 1.14.6 (Debian, Ubuntu) and newer
+from `contracts/cli/v1/` under `cli/v1/`.
+
+`performance/` shows the newest run in `benchmarks/results/<revision>/` that has
+`public-logs.json`, `stress-1m.json` and `suite.json`, states whether the code
+changed after that revision, and repeats the figures in `performance/summary.json`. Markup from mandoc 1.14.6 (Debian, Ubuntu) and newer
 releases is normalized to one form. The build stops if a page loses its sections
 or a linked anchor disappears.
 

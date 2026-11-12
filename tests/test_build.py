@@ -122,6 +122,12 @@ class FullBuild(unittest.TestCase):
             page = (out / "man" / "lumtail-agent.7.html").read_text()
             self.assertIn('<link rel="alternate" type="text/markdown" href="lumtail-agent.7.md">', page)
             self.assertIn("# DESCRIPTION", (out / "man" / "lumtail-agent.7.md").read_text())
+            if (source / "benchmarks" / "results").is_dir():
+                import json
+                summary = json.loads((out / "performance" / "summary.json").read_text())
+                self.assertRegex(summary["revision"], r"^[0-9a-f]{40}$")
+                self.assertTrue(summary["public_logs"] and summary["generated_1m_records"])
+                self.assertIn(summary["revision"][:7], (out / "performance" / "index.html").read_text())
 
 
 if __name__ == "__main__":
