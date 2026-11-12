@@ -44,7 +44,7 @@ The [Pages workflow](.github/workflows/pages.yml) deploys on:
 
 | Trigger | When |
 | --- | --- |
-| `lumtail-updated` dispatch | Sent by [`site.yml`](https://github.com/lumtail/lumtail/blob/main/.github/workflows/site.yml) in lumtail/lumtail when it publishes a release or pushes to `main` touching `man/`, `assets/img/`, `assets/demo/`, `assets/LICENSE`, `LICENSE`, `README.md`, `docs/agents.md`, `docs/cli-api.md` or `contracts/cli/v1/` |
+| `lumtail-updated` dispatch | Sent by [`site.yml`](https://github.com/lumtail/lumtail/blob/main/.github/workflows/site.yml) in lumtail/lumtail when it publishes a release or pushes to `main` touching `man/`, `assets/img/`, `assets/demo/`, `assets/LICENSE`, `LICENSE`, `README.md`, `docs/agents.md`, `docs/cli-api.md`, `contracts/cli/v1/` or `benchmarks/results/` |
 | Schedule, every 6 hours | Deploys only when the content key differs from the live `build.json` (covers advisories and missed dispatches) |
 | Push here, manual run | Always |
 
