@@ -103,6 +103,24 @@ class AgentText(unittest.TestCase):
             self.assertIn(f"{build.BASE_URL}man/{page}.md", text)
         for command in build.AGENT_EXAMPLES:
             self.assertIn(command, text)
+        self.assertIn("https://raw.githubusercontent.com/lumtail/lumtail/main/.claude/skills/lumtail/SKILL.md", text)
+        self.assertNotIn("Latest pre-release", text)
+
+        ctx["releases"] = [{"tag": "v0.1.0-beta", "prerelease": True,
+                            "url": f"{build.GH}/releases/tag/v0.1.0-beta"}]
+        text = build.llms_txt(ctx)
+        self.assertIn(f"[Latest pre-release (v0.1.0-beta)]({ctx['releases'][0]['url']})", text)
+        self.assertNotIn("Latest stable release", text)
+
+        ctx["releases"] += [
+            {"tag": "v0.1.0", "prerelease": False, "published_at": "2026-11-14T00:00:00Z",
+             "url": f"{build.GH}/releases/tag/v0.1.0"},
+            {"tag": "v0.2.0", "prerelease": False, "published_at": "2026-11-15T00:00:00Z",
+             "url": f"{build.GH}/releases/tag/v0.2.0"},
+        ]
+        text = build.llms_txt(ctx)
+        self.assertIn("Latest stable release (v0.2.0)", text)
+        self.assertIn("Latest pre-release (v0.1.0-beta)", text)
 
 
 class Demos(unittest.TestCase):
@@ -132,9 +150,19 @@ class FullBuild(unittest.TestCase):
             out = Path(tmp)
             build.build(source, out)
             for path in ("llms.txt", "llms-full.txt", "download/releases.json",
-                         "cli/v1/agent-schema.json", "cli/v1/LICENSE", "docs/agents.md",
+                         "cli/v1/agent-schema.json", "cli/v1/agent-compact/schema.json",
+                         "cli/v1/LICENSE", "docs/agents.md",
                          *(f"man/{p}.md" for p in build.PAGES)):
                 self.assertTrue((out / path).is_file(), path)
+            index = (out / "llms.txt").read_text()
+            sections = re.split(r"\n## [^\n]+\n", index)[1:]
+            for section in sections:
+                for line in section.strip().splitlines():
+                    self.assertRegex(line, r"^- \[[^\]]+\]\(https://[^)]+\)(?:: .+)?$")
+            for url in re.findall(r"\]\((https://[^)]+)\)", index):
+                if url.startswith(build.BASE_URL):
+                    path = url.removeprefix(build.BASE_URL)
+                    self.assertTrue((out / (path + "index.html" if path.endswith("/") else path)).is_file(), url)
             page = (out / "man" / "lumtail-agent.7.html").read_text()
             self.assertIn('<link rel="alternate" type="text/markdown" href="lumtail-agent.7.md">', page)
             self.assertIn("# DESCRIPTION", (out / "man" / "lumtail-agent.7.md").read_text())
