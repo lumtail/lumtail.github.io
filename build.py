@@ -172,6 +172,20 @@ def human_size(size: int) -> str:
     return ""
 
 
+# Distribution tags and package formats from lumtail's release workflow.
+LINUX_PACKAGES = (
+    (r"[.~]debian(\d+)_[^.]+\.deb$", "Debian {}"),
+    (r"[.~]ubuntu(\d+\.\d+)_[^.]+\.deb$", "Ubuntu {}"),
+    (r"\.fc(\d+)\.[^.]+\.rpm$", "Fedora {}"),
+    (r"\.el(\d+)\.[^.]+\.rpm$", "AlmaLinux {}"),
+    (r"\.lp(\d{2})(\d+)\.[^.]+\.rpm$", "openSUSE Leap {}.{}"),
+    (r"\.amzn(\d+)\.[^.]+\.rpm$", "Amazon Linux {}"),
+    (r"\.pkg\.tar\.zst$", "Arch Linux"),
+    (r"\.gpkg\.tar$", "Gentoo"),
+    (r"-nixos-[^.]+\.tar\.(?:gz|xz)$", "NixOS"),
+)
+
+
 def platform_of(name: str) -> tuple[str, str]:
     low = name.lower()
     if re.search(r"(sha256|sha512|checksums?|\.sig$|\.asc$|\.pem$|\.sbom|\.spdx|\.intoto|\.sigstore)", low):
@@ -184,6 +198,9 @@ def platform_of(name: str) -> tuple[str, str]:
         ("x86_64", "x86-64"), ("amd64", "x86-64"), ("aarch64", "arm64"),
         ("arm64", "arm64"), ("universal", "universal"))
         if key in low), "")
+    for pattern, label in LINUX_PACKAGES:
+        if match := re.search(pattern, low):
+            return label.format(*match.groups()), arch
     if not system and re.search(r"(source|src|\.tar\.(gz|xz)$)", low):
         system = "Source"
     return system or "Other", arch
@@ -636,9 +653,11 @@ def asset_table(release: dict) -> str:
     if not release["assets"]:
         return '<p class="empty-inline">No binaries attached; use the source archive on GitHub.</p>'
     rows = []
-    order = ("Linux", "macOS", "FreeBSD", "OpenBSD", "NetBSD", "Source", "Other", "Checksums & signatures")
-    for a in sorted(release["assets"], key=lambda a: (order.index(platform_of(a["name"])[0]), a["name"])):
-        system, arch = platform_of(a["name"])
+    # Put the generic Linux archives first, followed by named distributions.
+    order = {"Linux": 0, "macOS": 2, "FreeBSD": 3, "OpenBSD": 4, "NetBSD": 5,
+             "Source": 6, "Other": 7, "Checksums & signatures": 8}
+    assets = [(*platform_of(a["name"]), a) for a in release["assets"]]
+    for system, arch, a in sorted(assets, key=lambda row: (order.get(row[0], 1), row[0], row[2]["name"])):
         digest = (f'<button type="button" class="hash copy" data-copy="{a["sha256"]}" title="Copy SHA-256">'
                   f'<code>{a["sha256"][:12]}…</code></button>' if a.get("sha256") else '<span class="muted">—</span>')
         rows.append(f"""<tr><td><span class="os">{esc(system)}</span>{f' <span class="arch">{esc(arch)}</span>' if arch else ''}</td>
